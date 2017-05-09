@@ -1,0 +1,29 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1492642705263.000,
+    "dirty" : false,
+    "encoding" : "",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "A16BCBD5",
+    "lastKnownWriteTime" : 4603510784,
+    "last_content_update" : 1492642705263,
+    "path" : null,
+    "project_path" : null,
+    "properties" : {
+        "cacheKey" : "E9966FAC",
+        "caption" : "transVecs",
+        "contentUrl" : "grid_resource/gridviewer.html?env=&obj=transVecs&cache_key=E9966FAC",
+        "displayedObservations" : "4",
+        "environment" : "",
+        "object" : "transVecs",
+        "preview" : "0",
+        "totalObservations" : "4",
+        "variables" : "50"
+    },
+    "relative_order" : 4,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_dataframe"
+}

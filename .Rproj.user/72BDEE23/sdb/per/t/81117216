@@ -1,0 +1,20 @@
+{
+    "collab_server" : "",
+    "contents" : "library(gutenbergr)\nlibrary(tidyverse)\nlibrary(stringr)\nlibrary(tidytext)\nlibrary(GGally)\n\ncosSimilarity <- function(A, B)\n{\n  ip = t(A) %*% B\n  lA = sqrt(sum(A^2))\n  lB = sqrt(sum(B^2))\n  \n  return(ip / (lA * lB))\n}\n\ncosSimilarityMatrix <- function(colOrderDF)\n{\n  n = ncol(colOrderDF)\n  df <- matrix(0, nrow = n, ncol = n)\n  for(i in 1:n)\n  {\n    for(j in 1:n)\n    {\n      df[i,j] = cosSimilarity(colOrderDF[,i], colOrderDF[,j])\n    }\n  }\n  \n  return(df)\n}\n\ngetwordfreq <- function(idvec, mirror = 'http://mirrors.xmission.com/gutenberg/'){\n    first <- idvec[1]\n    others <- idvec[-1]\n    \n    totalBookCount = length(idvec)\n    \n    result <- gutenberg_download(first, mirror) %>% \n                         unnest_tokens(word, text) %>% \n                         anti_join(stop_words) %>% \n                         count(word)\n    colnames(result)[2] = paste0(\"c\", first)\n    \n    cnt = 0\n    for(i in others){\n        book = gutenberg_download(i, mirror)\n        book <- book %>% \n            unnest_tokens(word, text) %>% \n            anti_join(stop_words) %>% \n            count(word)\n        colnames(book)[2] = paste0(\"c\", i)\n        result <- full_join(book, result, by = \"word\")\n        cnt = cnt + 1\n        print(paste0(\"finished \", cnt, \" / \", totalBookCount))\n    }\n    \n    freq <- result[,2:ncol(result)]\n    \n    freq[!is.na(freq)] = T\n    freq[is.na(freq)] = F\n    \n    freq <- rowSums(freq)\n    \n    result[is.na(result)] = 0\n    \n    result <- result %>% add_column(rs = freq) %>% filter(rs >= totalBookCount * 0.75) %>% select(-rs)\n    \n    return(result)\n}\n\n\nmeta <- gutenberg_works()\nmeta <- filter(meta, !is.na(title) & !is.na(author) & str_detect(rights, 'Public domain'))\n\n#meta <- meta[sample(1:nrow(meta), 50), ]\nView(meta)\n\nfilt <- gutenberg_subjects %>% \n    separate(subject, paste0('c',as.character(1:10)), sep = \"\\\\s+--\\\\s+\") %>%\n    gather(num, subject, c1:c10) %>%\n    filter(!is.na(subject), subject_type != 'lcc') %>%\n    select(-num)\n\nfilt$subject <- str_to_lower(filt$subject)\n\nfilt <- unique(filt)\n\nfilt <- filter(filt, subject == 'fiction')\nfilt <- filt[1:350,]\n\ntemp <- getwordfreq(c(1,2,3,5,10,14,15))\nView(temp)\n\n# svd\norigVecs <- t(data.matrix(temp[,2:ncol(temp)]))\nvecMeans <- colMeans(origVecs)\n\nfor(i in 1:nrow(origVecs))\n{\n  origVecs[i,] = origVecs[i,] - vecMeans\n}\n\nView(origVecs)\n\norigVecsSvd <- svd(origVecs, nu = 0, nv = 50)\n\ntransVecs <- origVecs %*% origVecsSvd$v\nView(transVecs)\n\npcaframe <- as.data.frame(transVecs)\nggplot(data = pcaframe) + geom_point(aes(x = V1, y = V2))\n\nsimMat <- cosSimilarityMatrix(t(transVecs)[,1:7])\nView(simMat)\n\nsimMat <- simMat + 1\nnet = network(simMat, directed = FALSE, ignore.eval = FALSE, names.eval = \"weights\")\nggnet2(net, label = colnames(temp)[2:11], edge.size = \"weights\")\n\n# subject counts\nsubjCounts <- group_by(filt, subject) %>% summarise(freq = n()) %>% arrange(desc(freq))\n\nsubjCounts <- subjCounts[1:20,]\n\nsubjCounts$subject <- factor(subjCounts$subject, levels = subjCounts$subject)\n\nggplot(data = subjCounts) +\n    geom_bar(aes(x = subject, weight = freq)) + \n    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))\n\n",
+    "created" : 1492623356768.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "2605642148",
+    "id" : "81117216",
+    "lastKnownWriteTime" : 1492720382,
+    "last_content_update" : 1492720382332,
+    "path" : "~/STOR390/Final Project/finalproj_day3.R",
+    "project_path" : "finalproj_day3.R",
+    "properties" : {
+    },
+    "relative_order" : 3,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

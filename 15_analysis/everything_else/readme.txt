@@ -1,0 +1,1 @@
+Work was all collected and organized into the markdown file which outlines the project approach and results.

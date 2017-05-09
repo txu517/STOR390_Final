@@ -1,0 +1,1 @@
+Data are extracted on request from the online gutenberg repository using the "gutenbergr" package. See markdown file for specifics.

@@ -1,0 +1,29 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1492718322480.000,
+    "dirty" : false,
+    "encoding" : "",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "973B098C",
+    "lastKnownWriteTime" : 4320193280,
+    "last_content_update" : 1492718322480,
+    "path" : null,
+    "project_path" : null,
+    "properties" : {
+        "cacheKey" : "9B193197",
+        "caption" : "simMat",
+        "contentUrl" : "grid_resource/gridviewer.html?env=&obj=simMat&cache_key=9B193197",
+        "displayedObservations" : "7",
+        "environment" : "",
+        "object" : "simMat",
+        "preview" : "0",
+        "totalObservations" : "7",
+        "variables" : "7"
+    },
+    "relative_order" : 6,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_dataframe"
+}

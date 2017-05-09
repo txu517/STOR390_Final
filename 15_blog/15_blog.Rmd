@@ -1,0 +1,170 @@
+---
+title: "Automating the Librarian"
+subtitle: "An unsupervised approach for quantifying writing style."
+author: "Aleksandr Touzov, Tailong Xu"
+date: "May 9, 2017"
+output: 
+  html_document: 
+    theme: journal
+---
+
+For information about the course behind this project, see the [STOR 390 Website](https://idc9.github.io/stor390/)
+
+```{r, include=FALSE}
+# load resources
+
+library(knitr)
+library(gutenbergr)
+library(tidyverse)
+library(stringr)
+library(tidytext)
+library(GGally)
+library(network)
+library(sna)
+
+source('15_blog_helpers.R')
+```
+
+## Introduction
+Oftentimes, our earliest memories are of reading that very first book. Reading is such a fundamental part of our education and lives, that you would be hard-pressed to find someone in this day and age who doesn't enjoy the occasional novel. 
+
+*"A room without books is like a body without a soul" -- Cicero*
+
+Books are unique in the sense that every story is different. Apart from stories, any given author has their own unique characteristic style of writing. These special elements are so intriguing and complex, that scholars have dedicated their lives to literary analysis and stylometric attribution. Rather than attempting to do so ourselves, we've utilized the wonders of modern technology to try and develop a method of characterizing books based on the author's writing style. Once we've created a process reliable enough to group books based on similarities in writing style, we can apply it toward practical real-word applications, such as making book recommendations for readers. 
+
+With our method, we hope to provide an interested reader with an approach for suggesting stylistically similar books or novels to those which the reader may have enjoyed in the past. Because style is a subjective property of a text, we needed to develop an appropriate metric for determining the effectiveness of our algorithm. Under the assumption that an author will write in a similar style across multiple pieces, we decided to capture our approach's effectiveness in the error present when attempting to attribute authorship to a collection of texts of known authors.
+
+## Analysis
+Upon starting our investigation, we first needed to address a set of key concerns that would be crucial for guiding our exploration. First, we needed to establish a viable source of text data that would further drive our statistical analysis. Second, we had to determine an appropriate metric for comparison of similarity between text sources that would allow us to proceed in answering the question of how one might quantify style. Finally, based on the answers to the previous two questions, we needed to decide whether to approach the task with supervised or unsupervised statistical analysis.
+
+To begin, our first decision was to base our study on the text data available through the online Gutenberg repository. By querying the data, we decided to first examine the distribution of subject matter that was available in the repository to see which genre offered the largest sample of data for analysis.
+
+```{r, echo=FALSE, warning=FALSE}
+subjects <- get_all_book_subjects() %>% group_by(subject) %>% summarise(freq = n()) %>% arrange(desc(freq))
+
+topSubjects <- subjects[1:10,]
+
+topSubjects$subject <- factor(topSubjects$subject, levels = topSubjects$subject)
+
+ggplot(data = topSubjects) +
+  geom_bar(aes(x = subject, weight = freq)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5), panel.background = element_blank()) + 
+  labs(x = 'Genre', y = 'Number of Books', title='Top 10 Most Abundant Genres in the Gutenberg Repository')
+```
+
+Based on the plot, the vast majority of the titles in the Gutenberg repository categorize under the genre of fiction and its associated subgenres. Consequently, we decided to focus our study specifically on the similarity between fiction novels, as this would provide us with the largest sample of working data. Furthermore, to determine whether we should apply a supervised or unsupervised learning approach to development of our algorithm, we decided to examine the distribution of authors in the database. Because our efficiency metric relies on being able to attribute authorship correctly, the availability of authorship data is an important factor for deciding an appropriate method of analysis.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+authorCounts <- get_all_works() %>% 
+  group_by(gutenberg_author_id) %>% 
+  summarise(booksWritten = n()) %>% 
+  inner_join(get_all_authors(), by = "gutenberg_author_id") %>% 
+  select(author, booksWritten) %>%
+  arrange(desc(booksWritten)) %>% 
+  rename("Author" = author, "Books Written" = booksWritten) %>%
+  top_n(10)
+
+kable(authorCounts)
+```
+
+As we can see, the majority of books are written by various co-authors, followed by a large collection of books with unknown original authors. Since most of the data does not allow for unique authorship labeling, this pushed us towards considering the task of developing an algorithm for unsupervised classification of similarity and authorship attribution.
+
+To identify a literary piece's style, we developed an approach for characterizing a book based on the number of occurrences of unique words present in the text. After removing stop words and cleaning out unnecessarily specific terms, such as names and dates, we map each text within a sample to an identifying word frequency vector. To demonstrate, we randomly sample 8 books from the repository as input into our filtering function which will only keep word tokens that are not stop words and appear in at least 80% of the sampled texts.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+set.seed(2321)
+
+works <- get_all_works()
+works <- works[sample(1:nrow(works), 8),]
+
+sampleFreqs <- get_word_freq_vectors(works$gutenberg_id, 0.8) %>% rename("Word" = word) %>% top_n(10)
+colnames(sampleFreqs) <- colnames(sampleFreqs) %>% str_replace("id_", "Book ")
+kable(sampleFreqs)
+```
+
+With the necessary tools established, and objective function outlined, we decide to develop and demonstrate our methodology on a sample of 16 texts from four different authors. A small sample size is chosen for convenient visualization and faster initial data processing. 
+
+After mapping each text to a standardized word frequency vector, singular value decomposition was used to reduce dimensionality in the word space. This optimization not only allows us to decrease the noise present in the data, but also to speed up later calculations. With our new transformed data, we use a cosine similarity measure between any two word frequency vectors to construct a similarity matrix which can be used to describe the stylistic similarity present between any two books. Similarly, our matrix representation can be visualized as an edge-weighted network where nodes can be seen as books and edge weights can be seen as the measure of similarity between texts. By thresholding the visualization to only include edges between books that are fairly similar in style, we begin to see a qualitative clustering of books written by the same author in our sample. This shows us that style is indeed more similar within an authors writings than between authors.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+bookIds <- c(11:13,54:55,4444:4449,3947:3951)
+bookAuthorNameIds <- c(rep("Alfred de Vigny",5),rep("George Meredith",6),rep("L. Frank Baum",2),rep("Lewis Carroll",3))
+usedAuthorIds <- c(rep(1,5),rep(2,6),rep(3,2),rep(4,3))
+
+wordFreqs <- get_word_freq_vectors(bookIds, 0.5)
+
+vec <- t(data.matrix(wordFreqs[,2:ncol(wordFreqs)]))
+vecMeans <- colMeans(vec)
+vecVar <- colVariance(vec)
+
+# standardize by subtracting mean and dividing by column std
+for(i in 1:nrow(vec))
+{
+  vec[i,] = (vec[i,] - vecMeans) / sqrt(vecVar)
+}
+
+# perform SVD on the standardized data
+vecSVD <- svd(vec, nu = 0, nv = 5)
+
+# transform the data into the new domain spanned by the first 20 principle vectors
+vec <- vec %*% vecSVD$v
+
+A <- cosine_similarity_matrix(t(vec)[,1:16])
+
+# threshold the values in the matrix for visualization, the weights will later be used instead.
+B <- A
+B[B > 0.1] = 1
+B[B <= 0.1] = 0
+diag(B) = 0
+
+labelNames <- colnames(wordFreqs)[2:17] %>% str_replace('_', ' ')
+
+net = network(B, directed = FALSE)
+net %v% "True Authorships" <- bookAuthorNameIds
+set.seed(135)
+ggnet2(net, label = labelNames, mode = "fruchtermanreingold", color = "True Authorships", color.palette = "Spectral") + guides(label = FALSE)
+```
+
+Because true authorship is only known for the purpose of establishing a baseline metric of efficiency in our algorithm, we needed a quantitative method for determining authorship assignments to nodes in our network representation based only on similarity information available. Our approach for assigning these community attributes focuses on the idea of partitioning the graph in such a way that reduces the cumulative weights of broken edges. However, the exact solution to such a minimization problem is known to be NP-complete in computational complexity. Thus, we decided to approximate the solution by transforming the optimization problem into an eigenvector clustering problem using spectral graph partitioning on our weighted adjacency matrix. After clustering the components of the four leading eigenvectors of the graph Laplacian using K-means, we found the error to be relatively low at around 6.25%, or 1 out of 16 points misclassified to produce the following stylistic cluster assignments.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+# calculate the graph Laplacian for spectral partitioning
+A = A + 1
+diag(A) = 0
+D = diag(rowSums(A))
+L = D - A
+
+# find the e.v. corresponding to smallest eigenvalues, discarding the trivial vector of (1,1,1,...,1)
+eigenL = eigen(L, symmetric = TRUE)
+U = eigenL$vectors[,ncol(eigenL$vectors):1]
+U = U[,2:4]
+
+# perform k means clustering on the transformed vectors to determine cluster assignments
+set.seed(24)
+cl = kmeans(U, 4, nstart = 64)
+assignments = cl$cluster
+error = tibble(authorIds = usedAuthorIds) %>% 
+  add_column(assignments) %>% 
+  group_by(authorIds) %>% 
+  summarise(numMissed = sum(assignments != vecMode(assignments))) %>% 
+  summarise(misclassified = sum(numMissed)) / length(assignments)
+
+# for reduced confusion in visualizing
+for(i in 1:length(assignments))
+{
+  if(assignments[i] == 2) assignments[i] = 1
+  else if(assignments[i] == 1) assignments[i] = 3
+  else if(assignments[i] == 3) assignments[i] = 4
+  else if(assignments[i] == 4) assignments[i] = 2
+}
+
+net = network(B, directed = FALSE)
+net %v% "Cluster Assignments" <- assignments
+set.seed(135)
+ggnet2(net, label = labelNames, mode = "fruchtermanreingold", color = "Cluster Assignments", color.palette = "Spectral") + guides(label = FALSE)
+```
+
+Thus far, our method has been demonstrated on a relatively small sample of books. To see how our method fairs on a more robust collection of text, we expanded our sample to incorporate a larger portion of fiction texts. By sampling the entire fiction genre, we first remove authors that have written fewer than 20 books and texts that have fewer than 5000 unique words. This is performed in order to remove short stories or novels that may not have enough word frequency information to use for appropriate comparison. After filtering, we are able to obtain a sample of 1444 books from 69 different authors that we then convert into word frequency vectors as before. Furthermore, we group the functionality used previously and compare the clustering error across a varying amount of principal components to select the component parameter that results in the smallest clustering error. After executing our method on this larger data set, we found an error of approximately 30% misclassification when using seven principle components for dimension reduction.
+
+## Conclusion
+We can see that the classification method is effective in sorting and characterizing books based on stylistic nuances. Since we are able to accurately attribute books under the same author with approximately 70% accuracy on a set of 1444 fiction novels, we expect to be able to apply our classification method to a more practical recommendation system. Based on the notion that books of similar writing style retain similar interests in a reader, we hope that our method provides an approach for allowing an interested person to find book recommendations for further reading. To do this, one might consider varying the number of communities selected to find a collection of books similar to one that they have been interested in. Alternatively, one might use the similarity network to find books of highest similarity to the one that they are currently reading as an option for further recommendation. In either case, our method provides an unsupervised approach for detecting stylistic similarity between texts that we hope may be applied to tasks of literature recommendation or style comparison.

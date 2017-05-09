@@ -1,0 +1,21 @@
+{
+    "collab_server" : "",
+    "contents" : "library(gutenbergr)\nlibrary(tidyverse)\nlibrary(stringr)\nlibrary(tidytext)\n\n#inner join - all books contain --------------------------------------\n\ngetwordfreq <- function(idvec, mirror = 'http://mirrors.xmission.com/gutenberg/'){\n    first <- idvec[1]\n    others <- idvec[-1]\n    \n    result <- gutenberg_download(first, mirror) %>% \n                         unnest_tokens(word, text) %>% \n                         anti_join(stop_words) %>% \n                         count(word)\n    colnames(result)[2] <- first\n    \n    for(i in others){\n        book = gutenberg_download(i, mirror)\n        book <- book %>% \n            unnest_tokens(word, text) %>% \n            anti_join(stop_words) %>% \n            count(word)\n        \n        colnames(book)[2] <- i\n\n        result <- inner_join(book, result, by = \"word\")\n        \n    }\n    return(result)\n}\n\n#testing func on 2 books ------------------------------------\nasdf <- getwordfreq(c(2,3))\n    \n\nmirror <- 'http://mirrors.xmission.com/gutenberg/'\ntest <- gutenberg_download(768, mirror)\n\ntidytest <- test %>% \n    unnest_tokens(word, text) %>% \n    anti_join(stop_words) %>% \n    count(word, sort = TRUE)\n\n#subject counts -------------------------------------------\nmeta <- gutenberg_works()\nmeta <- filter(meta, !is.na(title) & !is.na(author) & str_detect(rights, 'Public domain'))\n\nmeta <- meta[sample(1:nrow(meta), 50), ]\n\nfilt <- gutenberg_subjects %>% \n    separate(subject, paste0('c',as.character(1:10)), sep = \"\\\\s+--\\\\s+\") %>%\n    gather(num, subject, c1:c10) %>%\n    filter(!is.na(subject), subject_type != 'lcc') %>%\n    select(-num)\n\nfilt$subject <- str_to_lower(filt$subject)\n\n#filt <- unique(filt) %>% filter(subject == 'fiction')\n#filt <- filt[1:10, ]\n\n#getwordfreq(filt$gutenberg_id)\n\nfilt <- unique(filt) %>% group_by(subject) %>% summarise(freq = n()) %>% arrange(desc(freq))\n\nfilt <- filt[1:20,]\n\nfilt$subject <- factor(filt$subject, levels = filt$subject)\n\nggplot(data = filt) +\n    geom_bar(aes(x = subject, weight = freq)) + \n    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))\n\n#less selective method -------------------------------\n\ngetbestwords <- function(idvec, mirror = 'http://mirrors.xmission.com/gutenberg/'){\n    first <- idvec[1]\n    others <- idvec[-1]\n    \n    result <- gutenberg_download(first, mirror) %>% \n        unnest_tokens(word, text) %>% \n        anti_join(stop_words) %>% \n        count(word)\n    colnames(result)[2] <- first\n    \n    for(i in others){\n        book = gutenberg_download(i, mirror)\n        book <- book %>% \n            unnest_tokens(word, text) %>% \n            anti_join(stop_words) %>% \n            count(word)\n        \n        colnames(book)[2] <- i\n        \n        result <- full_join(book, result, by = \"word\")\n        \n    }\n    \n    result[result[,2:ncol(result)] > 0] <- TRUE\n    result[is.na(result)] <- FALSE\n    \n    return(result)\n}\n\ntemp <- getbestwords(c(2,3), mirror)\n\n",
+    "created" : 1492106792760.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "1630956156",
+    "id" : "BB9A25F5",
+    "lastKnownWriteTime" : 1492461789,
+    "last_content_update" : 1492461789647,
+    "path" : "~/STOR390/Final Project/finalproj.R",
+    "project_path" : "finalproj.R",
+    "properties" : {
+        "tempName" : "Untitled1"
+    },
+    "relative_order" : 1,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

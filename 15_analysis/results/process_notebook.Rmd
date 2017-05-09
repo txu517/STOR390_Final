@@ -1,0 +1,227 @@
+---
+title: "Analysis"
+author: "Aleksandr Touzov, Tailong Xu"
+date: "May 4, 2017"
+output: html_document
+---
+
+```{r, include=FALSE}
+# load resources
+
+library(gutenbergr)
+library(tidyverse)
+library(stringr)
+library(tidytext)
+library(GGally)
+library(network)
+library(sna)
+
+source('process_notebook_helpers.R')
+```
+
+## Abstract
+Using text data extracted from the Gutenberg online repository, we have developed a method of unsupervised learning that seeks to measure relative similarity between writing styles present in literary pieces. With our method, we hope to provide an interested reader with an approach for suggesting stylistically similar books or novels to those which the reader may have enjoyed in the past. Because, style is a subjective property of a text, we choose to capture a text's representation through a transformation of its word frequency vector; to measure the effectiveness of our approach, we conclude our study with an examination of authorship attribution which we use as a baseline metric for the effectiveness of our algorithm. Under the assumption that an author will write in a similar style across multiple pieces, our approach's effectiveness is captured in the error present when attempting to attribute authorship to a collection of texts of known authors.
+
+## Process Notebook
+Upon starting our investigation, we first needed to address a set of key concerns that would be crucial for guiding our exploration. First, we needed to establish a viable source of text data that would further drive our statistical analysis. Second, we had to determine an appropriate metric for comparison of similarity between text sources that would allow us to proceed in answering the question of how one might quantify style. Finally, based on the answers to the previous two questions, we needed to decide whether to approach the task from a supervised or unsupervised approach in statistical analysis. Ultimately, our goal was to develop a theory that could be applied to providing a reader a means of finding texts that the reader may enjoy based on the stylistic similarity that those texts share with other related texts. To determine the effectiveness of such an algorithm led us to our second goal of developing an objective function for determining how well our algorithm performed in accomplishing this task.
+
+To begin, our first decision was to base our study on the text data available through the online Gutenberg repository. By querying the data, we decided to first examine the distribution of subject matter that was available in the repository in hope that this would give us an idea for proceeding with the study.
+
+```{r, warning=FALSE}
+subjects <- get_all_book_subjects() %>% group_by(subject) %>% summarise(freq = n()) %>% arrange(desc(freq))
+
+topSubjects <- subjects[1:20,]
+
+topSubjects$subject <- factor(topSubjects$subject, levels = topSubjects$subject)
+
+ggplot(data = topSubjects) +
+    geom_bar(aes(x = subject, weight = freq)) + 
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5), panel.background = element_blank())
+```
+
+By examining the top 20 most frequent book subjects, we saw that the majority of titles in the repository are fiction in nature, followed by the second most popular category of history. From the collection of fiction titles, we then chose to examine the distribution of sub-genres of fiction.
+
+```{r, warning=FALSE}
+fictions <- subjects %>% filter(str_detect(subject, "fiction") & subject != "fiction")
+
+# total sub-genres
+nrow(fictions)
+
+topCnt <- 8;
+
+othercnt <- sum(fictions$freq) - sum(top_n(fictions, topCnt)$freq)
+
+freqVec <- c(top_n(fictions, topCnt)$freq, othercnt)
+nameVec <- c(top_n(fictions, topCnt)$subject, 'others')
+
+tibble() %>% ggplot(aes(x="", y=freqVec, fill=nameVec)) + geom_bar(width = 1, stat = "identity") + coord_polar("y", start=0) + theme(axis.text.x=element_blank(), panel.background = element_blank()) + labs(x='',y='',fill='category')
+```
+
+From this plot, we saw that, by far, the most popular genre is juvenile (kids) fiction, followed by science fiction. As juvenile fiction is typically written in shorter form and each text contains a smaller representative sample of the writing style, we recognized that this may impact the manner in which we select books later on. Proceeding, we chose to examine the distribution of authors in the repository; this would allow us to get a better idea of what approach we would use in the subsequent statistical analysis. Under the assumption that an author will typically write in a writing style representative of that authors 'voice', we set our sights on using the successful classifying of authorship as an objective measure for ranking any subsequently developed algorithm's success in comparing writing style.
+
+```{r, warning=FALSE}
+authorCounts <- get_all_works() %>% 
+  group_by(gutenberg_author_id) %>% 
+  summarise(booksWritten = n()) %>% 
+  inner_join(get_all_authors(), by = "gutenberg_author_id") %>% 
+  select(author, booksWritten) %>%
+  arrange(desc(booksWritten))
+
+authorCounts
+```
+
+As we can see, the majority of books are written by various co-authors, followed by a large collection of books with unknown original authors. Since most of the data does not allow for unique authorship labeling, this pushed us towards considering the task of developing an algorithm for unsupervised classification of similarity. With two of our concerns addressed, we now needed to determine an appropriate measure of similarity between texts. By identifying each book with a vector of word frequencies for non-stop words present in the literature, our hope was that such a representation would capture the necessary stylistic elements of the text for giving a general objective value for comparing style.
+
+In order to further reduce the influence of noise in our data representation, we developed a method for only considering words that are present among at least 'n' percent of the texts compared. This allowed us to remove words such as names, dates, and other possible values that do not necessarily provide any interesting information. To demonstrate, we randomly sample 10 books from the repository as input into our function and keep only words that appear in at least 80 percent of those books.
+
+```{r, warning=FALSE, message=FALSE}
+set.seed(2321)
+
+works <- get_all_works()
+works <- works[sample(1:nrow(works), 10),]
+
+get_word_freq_vectors(works$gutenberg_id, 0.8)
+```
+
+To find a suitable value for thresholding the data, we first examine the falloff in word count as we increase the thresholding value for this initial sample of size 10.
+
+```{r, warning=FALSE, message=FALSE}
+counts <- 1:10
+
+for(i in 1:10)
+{
+  counts[i] <- nrow(get_word_freq_vectors(works$gutenberg_id, i / 10))
+}
+
+tibble() %>% ggplot() + geom_point(aes(x=(1:10)/10,y=counts)) + geom_line(aes(x=(1:10)/10,y=counts)) + labs(x="threshold",y="word count") + theme(panel.background = element_blank())
+```
+
+With the necessary tools established, and objective function outlined, we decide to develop and demonstrate our methodology on a sample of 16 texts from four different authors. (A small sample size is chosen for convenient visualization and faster initial data processing. The final validation will be executed on a much larger sample size.) First and foremost, we establish representative vectors for each of our 16 books by counting word tokens present in the texts and filtering out stop words as well as words that do not appear in at least half of the pieces.
+
+```{r, warning=FALSE, message=FALSE}
+bookIds <- c(11:13,54:55,4444:4449,3947:3951)
+bookColorIds <- c(rep("cornflowerblue",5),rep("tomato",6),rep("limegreen",2),rep("yellow",3))
+usedAuthorIds <- c(rep(1,5),rep(2,6),rep(3,2),rep(4,3))
+
+wordFreqs <- get_word_freq_vectors(bookIds, 0.5)
+
+# number of words
+nrow(wordFreqs)
+
+# number of books
+ncol(wordFreqs) - 1
+```
+
+For each book in our sample, we now have a descriptive vector of word frequencies that can be used to identify the style of the book. Similarly, if we were to plot these vectors in the high dimensional word space, we would have a point cloud. To reduce noise and speed up future calculations, we decided to perform singular value decomposition (SVD) and use only the projections onto the first five principle vectors to identify each data point. Prior to executing SVD, we center and scale the data to improve the vector representation of the points after SVD.
+
+```{r, warning=FALSE, message=FALSE}
+vec <- t(data.matrix(wordFreqs[,2:ncol(wordFreqs)]))
+vecMeans <- colMeans(vec)
+vecVar <- colVariance(vec)
+
+# standardize by subtracting mean and dividing by column std
+for(i in 1:nrow(vec))
+{
+  vec[i,] = (vec[i,] - vecMeans) / sqrt(vecVar)
+}
+
+# perform SVD on the standardized data
+vecSVD <- svd(vec, nu = 0, nv = 5)
+
+# transform the data into the new domain spanned by the first 20 principle vectors
+vec <- vec %*% vecSVD$v
+```
+
+With our new transformed data, we want to examine how similar the books are so that we can then construct a weighted network for further analysis for grouping similar texts. To do this, we use the cosine similarity between these new vectors and compute a weighted adjacency matrix of vector to vector similarities. Using this matrix we visualize the similarity structure between books by thresholding edges that are 0.1 or greater in cosine similarity. Similarly, we color code the true group identities to give a qualitative view of how similarity is indeed shared more among an authors writings rather than between authors.
+
+```{r, warning=FALSE, message=FALSE}
+A <- cosine_similarity_matrix(t(vec)[,1:16])
+
+# threshold the values in the matrix for visualization, the weights will later be used instead.
+B <- A
+B[B > 0.1] = 1
+B[B <= 0.1] = 0
+diag(B) = 0
+
+net = network(B, directed = FALSE)
+set.seed(135)
+ggnet2(net, label = colnames(wordFreqs)[2:17], mode = "fruchtermanreingold", color = bookColorIds)
+```
+
+Next we perform spectral graph partitioning by applying k-means to the components of the first four eigenvectors of the graph Laplacian. Ideally, this partitioning problem seeks to minimize the size of the boundary weights between partitions in the graph. However, this is an NP hard problem that we are able to only approximate by clustering eigenvectors of the Laplacian matrix. After clustering, we examine the error in the group assignments by using the mode id in each cluster as the candidate for identifying the true assignment and counting the proportion of books that were assigned incorrectly.
+
+```{r, warning=FALSE, message=FALSE}
+  # calculate the graph Laplacian for spectral partitioning
+  A = A + 1
+  diag(A) = 0
+  D = diag(rowSums(A))
+  L = D - A
+  
+  # find the e.v. corresponding to smallest eigenvalues, discarding the trivial vector of (1,1,1,...,1)
+  eigenL = eigen(L, symmetric = TRUE)
+  U = eigenL$vectors[,ncol(eigenL$vectors):1]
+  U = U[,2:4]
+  
+  # perform k means clustering on the transformed vectors to determine cluster assignments
+  set.seed(24)
+  cl = kmeans(U, 4, nstart = 64)
+  assignments = cl$cluster
+  error = tibble(authorIds = usedAuthorIds) %>% 
+    add_column(assignments) %>% 
+    group_by(authorIds) %>% 
+    summarise(numMissed = sum(assignments != vecMode(assignments))) %>% 
+    summarise(misclassified = sum(numMissed)) / length(assignments)
+  
+  # cluster assignments
+  tibble(bookID = colnames(wordFreqs)[2:17], assignment = assignments)
+  
+  # percent misclassified
+  error
+```
+
+Finally, we expand our sample to include a larger and more diverse collection of authors and books. By sampling from the fiction genre, and removing authors that have written fewer than 20 books we obtain a much larger sample to run our algorithm on and compare accuracy in authorship attribution as before. Further filtering removes texts that have fewer than 5000 unique non-stop words. This is performed in order to remove short stories or novels that may not have enough word frequency information to use for appropriate comparison. With this filtering, we are able to obtain a sample of 1444 books from 69 different authors that we then convert into word frequency vectors as before. Using a threshold of 0.75 we only keep non-stop words that are present in at least 75% of the 1444 books. Furthermore, we group the functionality used previously into a method so that we can compare the clustering error across a varying amount of principal components and select the component parameter that results in the smallest clustering error.
+
+```{r, warning=FALSE, message=FALSE}
+keepBooks <- get_all_book_subjects() %>% 
+  filter(subject == "fiction") %>%
+  inner_join(get_all_works(), by = "gutenberg_id")
+
+authorCounts <- group_by(keepBooks, gutenberg_author_id) %>% 
+  summarise(booksWritten = n())
+
+keepBooks <- keepBooks %>% inner_join(authorCounts, by = "gutenberg_author_id") %>% 
+  filter(booksWritten > 20)
+
+wordCounts <- gutenberg_download(keepBooks$gutenberg_id, 'http://mirrors.xmission.com/gutenberg/') %>% 
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words) %>% group_by(gutenberg_id, word) %>% summarise(cnt = n()) %>% group_by(gutenberg_id) %>% summarise(uniqueWords = n())
+
+keepBooks <- inner_join(keepBooks, wordCounts, by = "gutenberg_id") %>% filter(uniqueWords > 5000)
+
+usedAuthorIds <- keepBooks %>% select(gutenberg_id, gutenberg_author_id)
+authorAmount <- keepBooks %>% group_by(gutenberg_author_id) %>% summarise(bookCnt = n()) %>% nrow
+
+# number of books
+nrow(keepBooks)
+
+# number of authors
+authorAmount
+
+wordFreqs <- get_word_freq_vectors(keepBooks$gutenberg_id, 0.75)
+
+errors <- tibble(PC = 2:30, error = 2:30)
+for(i in 2:30)
+{
+  errors[i-1,2] <- errorCalculation(wordFreqs, i, authorAmount, usedAuthorIds)
+}
+
+minInd <- which.min(errors$error)
+
+# components used
+errors[minInd, 1]
+
+# percent misclassified
+errors[minInd, 2]
+```
+
+Thus, we can see that the classification method is effective in sorting and characterizing books based on stylistic nuances. Since we are able to accurately attribute books under the same author with approximately 70% accuracy on a set of 1444 fiction novels, we expect to be able to apply our classification method to a more practical recommendation system. Based on the notion that books of similar writing style retain similar interests in a reader, we hope that our method provides an approach for allowing an interested person to find book recommendations for further reading. To do this, one might consider varying the number of communities selected to find a collection of books similar to one that they have been interested in. Alternatively, one might use the cosine similarity network to find books of highest similarity to the one that they are currently reading as an option for further recommendation. In either case, our method provides an unsupervised approach for detecting stylistic similarity between texts that we hope may be applied to tasks of literature recommendation or style comparison.

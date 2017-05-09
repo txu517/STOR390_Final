@@ -1,0 +1,20 @@
+{
+    "collab_server" : "",
+    "contents" : "library(gutenbergr)\nlibrary(tidyverse)\nlibrary(stringr)\nlibrary(tidytext)\n\ngetwordfreq <- function(idvec, mirror = 'http://mirrors.xmission.com/gutenberg/'){\n    first <- idvec[1]\n    others <- idvec[-1]\n    \n    totalBookCount = length(idvec)\n    \n    result <- gutenberg_download(first, mirror) %>% \n                         unnest_tokens(word, text) %>% \n                         anti_join(stop_words) %>% \n                         count(word)\n    colnames(result)[2] = paste0(\"c\", first)\n    \n    cnt = 0\n    for(i in others){\n        book = gutenberg_download(i, mirror)\n        book <- book %>% \n            unnest_tokens(word, text) %>% \n            anti_join(stop_words) %>% \n            count(word)\n        colnames(book)[2] = paste0(\"c\", i)\n        result <- full_join(book, result, by = \"word\")\n        cnt = cnt + 1\n        print(paste0(\"finished \", cnt, \" / \", totalBookCount))\n    }\n    \n    freq <- result[,2:ncol(result)]\n    \n    freq[!is.na(freq)] = T\n    freq[is.na(freq)] = F\n    \n    freq <- rowSums(freq)\n    \n    result[is.na(result)] = 0\n    \n    result <- result %>% add_column(rs = freq) %>% filter(rs >= totalBookCount * 0.75) %>% select(-rs)\n    \n    return(result)\n}\n\nasdf <- getwordfreq(c(2,3))\n\nmirror <- 'http://mirrors.xmission.com/gutenberg/'\ntest <- gutenberg_download(768, mirror)\n\ntidytest <- test %>% \n    unnest_tokens(word, text) %>% \n    anti_join(stop_words) %>% \n    count(word, sort = TRUE)\n\n\nmeta <- gutenberg_works()\nmeta <- filter(meta, !is.na(title) & !is.na(author) & str_detect(rights, 'Public domain'))\n\n#meta <- meta[sample(1:nrow(meta), 50), ]\nView(meta)\n\nfilt <- gutenberg_subjects %>% \n    separate(subject, paste0('c',as.character(1:10)), sep = \"\\\\s+--\\\\s+\") %>%\n    gather(num, subject, c1:c10) %>%\n    filter(!is.na(subject), subject_type != 'lcc') %>%\n    select(-num)\n\nfilt$subject <- str_to_lower(filt$subject)\n\nfilt <- unique(filt)\n\nfilt <- filter(filt, subject == 'fiction')\nfilt <- filt[1:350,]\n\ntemp <- getwordfreq(filt$gutenberg_id)\nstr(temp)\nView(temp)\n\n# subject counts\nsubjCounts <- group_by(filt, subject) %>% summarise(freq = n()) %>% arrange(desc(freq))\n\nsubjCounts <- subjCounts[1:20,]\n\nsubjCounts$subject <- factor(subjCounts$subject, levels = subjCounts$subject)\n\nggplot(data = subjCounts) +\n    geom_bar(aes(x = subject, weight = freq)) + \n    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))\n\n",
+    "created" : 1492624086454.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "238310727",
+    "id" : "4F823528",
+    "lastKnownWriteTime" : 1492461482,
+    "last_content_update" : 1492461482,
+    "path" : "~/STOR390/Final Project/finalproj_day2.R",
+    "project_path" : "finalproj_day2.R",
+    "properties" : {
+    },
+    "relative_order" : 2,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}
